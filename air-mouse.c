@@ -12,6 +12,8 @@
 
 #include <pthread.h>
 
+#include <gtk/gtk.h>
+
 
 #define MOUSEMOVE_PORT 6666
 #define KEYINPUT_PORT 6667
@@ -22,17 +24,19 @@
 #define MOUSE_MOVE -9
 #define KB_INPUT -10
 
-// Temporary. TODO: Remove
-#define SCREEN_WIDTH 1920
-#define SCREEN_HEIGHT 1080
-
 const char PREFIX[] = { 87, 52, 109, 98, 68 };
+
+int SCREEN_WIDTH = 0;
+int SCREEN_HEIGHT = 0;
+
+GtkWidget* discovery_label;
+GtkWidget* mouse_label;
+GtkWidget* keys_label;
 
 size_t getPostPrefixIndex(char buff[], size_t size) {
     int i = 0;
     while(i < 5 && i < size) {
         if(PREFIX[i] != buff[i]) {
-            printf("Not equal\n");
             return size;
         }
         i++;
@@ -70,10 +74,39 @@ void announce(char ver[]) {
 	close(announce_fd);
 }
 
+
+void set_discovery_status(GtkLabel* label, int status) {
+    if(status) {
+        gtk_label_set_markup(label, "DISCOVERY:   <span foreground='green'>OK</span>");
+    }
+    else {
+        gtk_label_set_markup(label, "DISCOVERY:   <span foreground='red'>ERROR</span>");
+    }
+}
+
+void set_mouse_status(GtkLabel* label, int status) {
+    if(status) {
+        gtk_label_set_markup(label, "MOUSE:   <span foreground='green'>OK</span>");
+    }
+    else {
+        gtk_label_set_markup(label, "MOUSE:   <span foreground='red'>ERROR</span>");
+    }
+}
+
+void set_keys_status(GtkLabel* label, int status) {
+    if(status) {
+        gtk_label_set_markup(label, "KEYS:   <span foreground='green'>OK</span>");
+    }
+    else {
+        gtk_label_set_markup(label, "KEYS:   <span foreground='red'>ERROR</span>");
+    }
+}
+
+
 void* discovery_t() {
     int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(fd < 0) {
-        // TODO: Set status
+        set_discovery_status((GtkLabel*) discovery_label, 0);
         return NULL;
     }
     
@@ -84,7 +117,7 @@ void* discovery_t() {
     addr.sin_port = htons(DISCOVERY_PORT);
     
     if(bind(fd, (const struct sockaddr*) &addr, sizeof(addr)) < 0) {
-        // TODO: Set status
+        set_discovery_status((GtkLabel*) discovery_label, 0);
         close(fd);
         return NULL;
     }
@@ -101,9 +134,14 @@ void* discovery_t() {
     
     announce(ver);
     
-    // TODO: Set status positive
+    set_discovery_status((GtkLabel*) discovery_label, 1);
     
-    while(size = recvfrom(fd, buff, 8, 0, (struct sockaddr*) &client_addr, (socklen_t*) &caddr_size) != -1) {
+    while(1) {
+        size = recvfrom(fd, buff, 8, 0, (struct sockaddr*) &client_addr, (socklen_t*) &caddr_size);
+        if(size == -1) {
+            break;
+        }
+        
         if(size > 1) {
             uint16_t client_version;
             memcpy(&client_version, &buff, 2);
@@ -111,13 +149,12 @@ void* discovery_t() {
         }
         else {
             sendto(fd, ver, (int) strlen(ver), 0, (const struct sockaddr*) &client_addr, sizeof(client_addr));
-            printf("Announced!\n");
         }
         
         memset(&client_addr, 0, caddr_size);
     }
     
-    // TODO: Set status
+    set_discovery_status((GtkLabel*) discovery_label, 0);
     
     close(fd);
 }
@@ -126,7 +163,7 @@ void* mouse_move_t() {
     int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(fd < 0) {
         //perror("Could not create socket");
-        // TODO: Set status
+        set_mouse_status((GtkLabel*) mouse_label, 0);
         return NULL;
     }
     
@@ -137,7 +174,7 @@ void* mouse_move_t() {
     addr.sin_port = htons(MOUSEMOVE_PORT);
     
     if(bind(fd, (const struct sockaddr*) &addr, sizeof(addr)) < 0) {
-        // TODO: Set status
+        set_mouse_status((GtkLabel*) mouse_label, 0);
         close(fd);
         return NULL;
     }
@@ -152,7 +189,7 @@ void* mouse_move_t() {
 	char cmd[50];
 	memset(cmd, 0, 50);
     
-    // TODO: Set status positive
+    set_mouse_status((GtkLabel*) mouse_label, 1);
     
     while(1) {
         size = recv(fd, buff, 13, 0);
@@ -171,15 +208,14 @@ void* mouse_move_t() {
         system(cmd);
     }
     
-    // TODO: Set status
-    
+    set_mouse_status((GtkLabel*) mouse_label, 0);
     close(fd);
 }
 
 void* key_input_t() {
     int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(fd < 0) {
-        // TODO: Set status
+        set_keys_status((GtkLabel*) keys_label, 0);
         return NULL;
     }
     
@@ -190,9 +226,8 @@ void* key_input_t() {
     addr.sin_port = htons(KEYINPUT_PORT);
     
     if(bind(fd, (const struct sockaddr*) &addr, sizeof(addr)) < 0) {
-        // TODO: Set status
+        set_keys_status((GtkLabel*) keys_label, 0);
         close(fd);
-        printf("Exiting key thread..\n");
         return NULL;
     }
 	
@@ -216,7 +251,7 @@ void* key_input_t() {
 	char buff[512];
 	memset(buff, 0, 512);
     
-    // TODO: Set status positive
+    set_keys_status((GtkLabel*) keys_label, 1);
     
     while(1) {
         size = recv(fd, buff, 512, 0);
@@ -233,13 +268,18 @@ void* key_input_t() {
                 system(key_cmd);
                 
                 if(buff[i + 1] == 0) {
+                    // TODO: Fix other inputs
                     i += 3;
                 }
                 
                 i += 3;
             }
             else if(buff[i] == MOUSE_MOVE && (i + 2) < size	) {
-                // TODO: Implement
+                float x = (((uint8_t) buff[i + 1]) / 256) * SCREEN_WIDTH;
+				float y = (((uint8_t) buff[i + 2]) / 256) * SCREEN_HEIGHT;
+				char move_cmd[32];
+                sprintf(move_cmd, "xdotool mousemove %.2f %.2f", x, y);
+                system(move_cmd);
                 i += 3;
             }
             else if(buff[i] >= 0 && buff[i] <= 9) {
@@ -252,12 +292,13 @@ void* key_input_t() {
         }
     }
     
-    // TODO: Set status
+    set_keys_status((GtkLabel*) keys_label, 0);
     
     close(fd);
 }
 
-int main(int argc, char* args[]) {
+
+void start_threads() {
     pthread_t discovery_t_id;
     pthread_create(&discovery_t_id, NULL, discovery_t, NULL);
     
@@ -266,10 +307,71 @@ int main(int argc, char* args[]) {
     
     pthread_t key_t_id;
     pthread_create(&key_t_id, NULL, key_input_t, NULL);
+}
+
+
+static void on_app_activate(GApplication *app, gpointer data) {
+    GtkWidget *window = gtk_application_window_new(GTK_APPLICATION(app));
+    gtk_window_set_default_size(GTK_WINDOW(window), 600, 400);
     
-    pthread_join(discovery_t_id, NULL);
+    GtkWidget* status_root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 15);
+    
+    if(system("xdotool --version")) {
+        printf("xdotool not found!\n");
+        GtkWidget* error_label = gtk_label_new(NULL);
+        gtk_label_set_markup((GtkLabel*) error_label, "<span foreground='red'>xdotool was not found!</span>");
+        gtk_box_pack_start((GtkBox*) status_root, error_label, 0, 0, 0);
+    }
+    else {
+        char output[12];
+        FILE *fp = popen("xdotool getdisplaygeometry", "r");
+        if(fp != NULL) {
+            while(fgets(output, sizeof(output), fp) != NULL) {
+                char* next;
+                int width = strtol(output, &next, 10);
+                int height = strtol(next + 1, NULL, 10);
+                if(width > 0) {
+                    SCREEN_WIDTH = width;
+                }
+                if(height > 0) {
+                    SCREEN_HEIGHT = height;
+                }
+            }
+            
+            pclose(fp);
+        }
+    }
+    
+    discovery_label = gtk_label_new(NULL);
+    mouse_label = gtk_label_new(NULL);
+    keys_label = gtk_label_new(NULL);
+    
+    gtk_box_pack_start((GtkBox*) status_root, discovery_label, 0, 0, 5);
+    gtk_box_pack_start((GtkBox*) status_root, mouse_label, 0, 1, 5);
+    gtk_box_pack_start((GtkBox*) status_root, keys_label, 0, 1, 5);
+    
+    gtk_container_add(GTK_CONTAINER(window), status_root);
+    
+    gtk_widget_show_all(GTK_WIDGET(window));
+    
+    start_threads();
+}
+
+
+int main(int argc, char* args[]) {
+    /** Start GTK app **/
+    GtkApplication *app = gtk_application_new(
+        "com.atompunkapps.air-mouse", 
+        G_APPLICATION_FLAGS_NONE
+    );
+    g_signal_connect(app, "activate", G_CALLBACK(on_app_activate), NULL);
+    int status = g_application_run(G_APPLICATION(app), argc, args);
+    // deallocate the application object
+    g_object_unref(app);
+    
+    /*pthread_join(discovery_t_id, NULL);
     pthread_join(move_t_id, NULL);
-    pthread_join(key_t_id, NULL);
+    pthread_join(key_t_id, NULL);*/
     
-    return 0;
+    return status;
 }
