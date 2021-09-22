@@ -2,7 +2,7 @@
 Linux server for Air Mouse.
 
 ### Dependencies
-- <href a="https://github.com/jordansissel/xdotool">xdotool</href>
+- [xdotool](https://github.com/jordansissel/xdotool)
 - gtk3
 
 ### Compilation
